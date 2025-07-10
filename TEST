@@ -1,0 +1,100 @@
+/**
+ * هذه الدالة تستقبل طلبات POST من نموذج HTML.
+ * تقوم بمعالجة البيانات، والتحقق من التكرار (البريد الإلكتروني، رقم ب.ت.و، رقم الهاتف)،
+ * ثم تحفظ البيانات الجديدة في Google Sheet أو ترجع رسالة خطأ إذا كانت البيانات مكررة.
+ *
+ * @param {Object} e - كائن الحدث الذي يحتوي على بيانات طلب POST.
+ * @returns {GoogleAppsScript.Content.TextOutput} استجابة JSON للعميل (صفحة HTML).
+ */
+function doPost(e) {
+  // تحقق مبدئي من وجود بيانات POST
+  if (!e || !e.postData || !e.postData.contents) {
+    return ContentService.createTextOutput(JSON.stringify({
+        result: "error",
+        message: "لم يتم استلام بيانات صالحة. الرجاء التأكد من إرسال النموذج بشكل صحيح."
+      }))
+      .setMimeType(ContentService.MimeType.JSON); // تم إزالة .setXFrameOptionsMode
+  }
+
+  var sheetName = "PreOrders"; // اسم الورقة في Google Sheet التي ستُحفظ فيها البيانات
+  var ss = SpreadsheetApp.getActiveSpreadsheet(); // الحصول على جدول البيانات النشط
+  var sheet = ss.getSheetByName(sheetName); // الحصول على الورقة بالاسم المحدد
+
+  // إذا لم تكن الورقة موجودة، يتم إنشاؤها وإضافة رؤوس الأعمدة
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+    // تأكد من أن هذه الرؤوس تتطابق تماماً مع ترتيب البيانات التي سترسلها من النموذج
+    sheet.appendRow(["Email", "National ID", "Full Name", "Phone", "Wilaya", "Daira/Baladia", "Bike Type", "Timestamp"]);
+  }
+
+  var data;
+  try {
+    data = JSON.parse(e.postData.contents); // تحليل بيانات JSON المرسلة من نموذج HTML
+  } catch (err) {
+    // التعامل مع خطأ في تحليل JSON
+    return ContentService.createTextOutput(JSON.stringify({
+        result: "error",
+        message: "خطأ في معالجة البيانات المرسلة. تنسيق JSON غير صحيح."
+      }))
+      .setMimeType(ContentService.MimeType.JSON); // تم إزالة .setXFrameOptionsMode
+  }
+
+  // التحقق من وجود جميع الحقول المطلوبة في البيانات المرسلة
+  var requiredFields = ["email", "nationalId", "fullName", "phone", "wilaya", "dairaBaladia", "bikeType"];
+  for (var i = 0; i < requiredFields.length; i++) {
+    if (!data.hasOwnProperty(requiredFields[i])) {
+      return ContentService.createTextOutput(JSON.stringify({
+          result: "error",
+          message: "بيانات ناقصة في الطلب: الحقل '" + requiredFields[i] + "' مفقود."
+        }))
+        .setMimeType(ContentService.MimeType.JSON); // تم إزالة .setXFrameOptionsMode
+    }
+  }
+
+  // استخراج البيانات الفردية للتحقق منها
+  var email = data.email;
+  var nationalId = data.nationalId;
+  var phone = data.phone;
+
+  // الحصول على جميع البيانات الموجودة حالياً في الورقة للتحقق من التكرار
+  var range = sheet.getDataRange(); // الحصول على نطاق البيانات المستخدمة
+  var values = range.getValues(); // الحصول على جميع القيم (صفوف وأعمدة) كـ 2D Array
+
+  // البحث عن وجود البريد الإلكتروني، رقم ب.ت.و، أو رقم الهاتف
+  // يبدأ من i = 1 لتخطي رؤوس الأعمدة (الصف الأول)
+  for (var i = 1; i < values.length; i++) {
+    var row = values[i]; // الصف الحالي الذي يتم فحصه
+    // التحقق مما إذا كان البريد الإلكتروني (العمود 0) أو رقم ب.ت.و (العمود 1)
+    // أو رقم الهاتف (العمود 3) مكرراً
+    if (row[0] === email || row[1] === nationalId || row[3] === phone) {
+      // إذا تم العثور على تطابق، قم بإرجاع رسالة خطأ إلى العميل
+      return ContentService.createTextOutput(JSON.stringify({
+          result: "error",
+          message: "أحد البيانات المدخلة (البريد الإلكتروني، رقم ب.ت.و، أو رقم الهاتف) مسجل لدينا من قبل. لا يمكنك إعادة التسجيل."
+        }))
+        .setMimeType(ContentService.MimeType.JSON); // تم إزالة .setXFrameOptionsMode
+    }
+  }
+
+  // إذا لم يتم العثور على أي بيانات مكررة، قم بإعداد الصف الجديد للحفظ
+  var rowData = [
+    email,
+    nationalId,
+    data.fullName,
+    phone,
+    data.wilaya,
+    data.dairaBaladia,
+    data.bikeType,
+    new Date() // إضافة تاريخ ووقت الإرسال الحالي
+  ];
+
+  // إضافة الصف الجديد إلى Google Sheet
+  sheet.appendRow(rowData);
+
+  // إرجاع رسالة نجاح إلى العميل
+  return ContentService.createTextOutput(JSON.stringify({
+      result: "success",
+      message: "تم حفظ البيانات بنجاح!"
+    }))
+    .setMimeType(ContentService.MimeType.JSON); // تم إزالة .setXFrameOptionsMode
+}
